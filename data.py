@@ -13,7 +13,9 @@ import numpy as np
 import cv2
 from utils import encode_hm_regr_and_wh_regr
 import albumentations as albu
-
+import os
+from tqdm import tqdm
+from utils import decode_predictions, bbox_xyxy_to_xywh, bbox_xywh_to_xyxy, bbox_iou
 def train_transform_norm(annotations,INPUT_SIZE,with_bboxes=True):
     image = annotations['image']
     # print("image.shape: ",image.shape)
@@ -173,7 +175,9 @@ class COCODetectionDataset(torch.utils.data.Dataset):
         img = np.array(Image.open(img_path).convert("RGB"))
 
         target = self.targets[idx]
-        boxes = np.array(target['boxes']).reshape(-1,4)
+        # print("target['boxes']: ",target['boxes'])
+        boxes = np.array(target['boxes'])
+        # print("boxes: ", boxes)
         # print("boxes: ",boxes)
         labels = np.array(target['labels'])
         annotations = {'image': img,
@@ -187,7 +191,7 @@ class COCODetectionDataset(torch.utils.data.Dataset):
         
         img  = anns['image'].transpose(2,0,1)
         boxes_aug = np.asarray(anns['bboxes'])
-        # print(boxes_aug)
+        # print("boxes_aug: ",boxes_aug)
 
         labels = np.asarray(anns['labels'])
         in_size = anns['in_size']
@@ -218,7 +222,7 @@ class COCODetectionDataset(torch.utils.data.Dataset):
             #                                                             IN_SCALE=1,
             #                                                             MAX_N_OBJECTS=128)
 
-        return img, hm, regr, wh,ind_masks,inds, in_size, out_size, intermediate_size, scale, boxes_aug, target, idx
+        return img, hm, regr, wh_regr,wh,ind_masks,inds, in_size, out_size, intermediate_size, scale, boxes_aug, target, idx
         # return img, hm,reg, cat_wh,cat_reg_mask,inds 
 def coco_detection_collate_fn(batch):
     img = torch.Tensor(np.stack([x[0] for x in batch], axis=0))
@@ -236,8 +240,74 @@ def coco_detection_collate_fn(batch):
     targets = [x[11] for x in batch]
     idxs = [x[12] for x in batch]
 
-    return img, hm, regr, wh,ind_masks,inds, in_size, out_size, intermediate_size, scale, boxes_aug, targets, idxs
+    return img, hm,regr,wh_regr, wh,ind_masks,inds, in_size, out_size, intermediate_size, scale, boxes_aug, targets, idxs
 
 if __name__ == '__main__':
     # TODO, test and make sure COCO dataset is loading correctly
-    pass
+    # /run/determined/workdir/coco_dataset/annotations/instances_minitrain2017.json
+    # /run/determined/workdir/coco_dataset/train2017
+    # /run/determined/workdir/coco_dataset/train2017
+    DATASET_DIR = '/run/determined/workdir/coco_dataset'
+    IMG_RESOLUTION=256 
+    MODEL_SCALE=1
+    # Mini COCO Dataset
+    ds = COCODetectionDataset(os.path.join(DATASET_DIR,'train2017'),
+    os.path.join(DATASET_DIR,'annotations/instances_minitrain2017.json'),
+    transform=train_transform_norm,
+    MODEL_SCALE=MODEL_SCALE,
+    IMG_RESOLUTION=IMG_RESOLUTION)
+    val_ds = COCODetectionDataset(os.path.join(DATASET_DIR,'val2017'),
+    os.path.join(DATASET_DIR,'annotations/instances_val2017.json'),
+    transform=train_transform_norm,
+    MODEL_SCALE=MODEL_SCALE,
+    IMG_RESOLUTION=IMG_RESOLUTION)
+                                  
+    for ind, (img,
+                  hm, 
+                  regr, 
+                  wh_regr,
+                  wh,
+                  inds_mask,
+                  inds,
+                  in_size,
+                  out_size,
+                  intermediate_size,
+                  scale,
+                  boxes_aug,
+                  target,
+                  idxs) in enumerate(tqdm(ds)):
+        # print(hm.shape)
+        # print(regr.shape)
+        # print(wh_regr.shape)
+        # hm, regr, wh_regr, w_h_,inds, ind_masks= encode_hm_regr_and_wh_regr(boxes_o, classes,N_CLASSES=2, input_size=128,MODEL_SCALE=2)
+        # print(hm.shape)
+        # print("hm.shape: {}, regr.shape: {}, wh_regr.shape: {}, w_h_.shape: {},inds.shape: {}, ind_masks.shape: {}".format(hm.shape, 
+        #                                                                                             regr.shape, 
+        #                                                                                             wh_regr.shape, 
+        #                                                                                             w_h_.shape,
+        #                                                                                             inds.shape, 
+        #                                                                                             ind_masks.shape))
+        hm_b = torch.from_numpy(hm).unsqueeze(0)
+        regr_b = torch.from_numpy(regr).unsqueeze(0)
+        # print(hm_b.shape)
+        # print(regr_b.shape)
+        
+        wh_regr_b = torch.from_numpy(wh_regr).unsqueeze(0)
+        # print(wh_regr_b.shape)
+        boxes,scores,clses = decode_predictions(hm_b,
+                                                regr_b,
+                                                wh_regr_b,
+                                                MODEL_SCALE=MODEL_SCALE,
+                                                K=100,
+                                                nms_thresh=0.5)
+        '''
+        boxes = np.array([[44,44,76,76],
+                        [15,17,113,113],
+                        [38,38,70,70]])
+        '''
+        # print(boxes_o)
+        print(boxes.shape, boxes_aug.shape)
+        print(bbox_xyxy_to_xywh(boxes.numpy()),scores,clses)
+        gt_bbox = bbox_xywh_to_xyxy(boxes_aug)
+        print(bbox_iou(gt_bbox, boxes.numpy()))
+        break
