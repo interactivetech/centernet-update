@@ -136,6 +136,7 @@ class EfficientCenterDet(nn.Module):
 
         self.cls_head  = Head(128,self.num_classes)
         self.reg_head = Head(128,2)
+        self.wh_reg_head = Head(128,2)
 
     def forward(self,x):
         '''
@@ -164,10 +165,12 @@ class EfficientCenterDet(nn.Module):
         y = self.conv1x1_3(y)
         outc = self.cls_head(y)
         outr = self.reg_head(y)
-        return outc, outr
+        out_whr=self.wh_reg_head(y)
+        return outc, outr, out_whr
 if __name__ == '__main__':
-
+    DEVICE='cuda'
     model = EfficientCenterDet(2)
+    model.to(DEVICE)
     print(torchsummary.summary(model,input_size=(3,256,256)))
-    out_c, out_r = model(torch.rand(1,3,256,256))
-    print(out_c.shape)
+    outc, outr, out_whr = model(torch.rand(1,3,256,256).to(DEVICE))
+    print(outc.shape)

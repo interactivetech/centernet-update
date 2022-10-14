@@ -1,18 +1,17 @@
-from data_gen import ShapeDataset
 import matplotlib.pyplot as plt
 from PIL import Image
 from data import COCODetectionDataset, coco_detection_collate_fn, train_transform_norm, validation_transform_norm
 from tqdm import tqdm
 import numpy as np
-from model import centernet
 from utils import encode_hm_regr_and_wh_regr, decode_predictions
-from loss import centerloss4
+from loss import centerloss
 import torch
 import cv2
 import torch
 from PIL import Image
-from val import val
-from efficient_centernet_model import EfficientCenternet, EfficientCenternet3, EfficientCenterDet
+# from val import val
+from model import EfficientCenterDet
+import os
 
 import torch.distributed as dist
 
@@ -62,6 +61,7 @@ def train(architecture='efd',
         losses = []
         mask_losses = []
         regr_losses = []
+        wh_regr_losses = []
         min_confidences = []
         median_confidences = []
         max_confidences = []
@@ -69,10 +69,12 @@ def train(architecture='efd',
         for epoch in tqdm(range(EPOCHS)):
                 for ind, (img,
                           hm, 
-                          reg, 
+                          regr, 
+                          wh_regr,
                           wh,
-                          reg_mask,
+                          inds_mask,
                           inds,
+                          regr_,
                           in_size,
                           out_size,
                           intermediate_size,
@@ -88,18 +90,33 @@ def train(architecture='efd',
                         # if DEVICE == 'cuda:0':
                         img = img.to(DEVICE).cuda(non_blocking=True)
                         hm = hm.to(DEVICE).cuda(non_blocking=True)
-                        reg = reg.to(DEVICE).cuda(non_blocking=True)
+                        regr = regr.to(DEVICE).cuda(non_blocking=True)
+                        wh_regr = wh_regr.to(DEVICE).cuda(non_blocking=True)
                         wh = wh.to(DEVICE).cuda(non_blocking=True)
-                        reg_mask = reg_mask.to(DEVICE).cuda(non_blocking=True)
+                        regr_ = regr_.to(DEVICE).cuda(non_blocking=True)
+                        inds_mask = inds_mask.to(DEVICE).cuda(non_blocking=True)
                         inds = inds.to(DEVICE).cuda(non_blocking=True)
-                        
+                        # print("inds_mask: ", inds_mask.shape)
+                        # print("inds: ", inds.shape)
                         optimizer.zero_grad()
                         # print("begin")
-                        pred_hm, pred_regs = model(img)
+                        pred_hm, pred_regs, pred_wh_regs = model(img)
                         # print("pred_hm: ",pred_hm.shape)
+                        # print("pred_regs: ",pred_regs.shape)
+                        # print("pred_wh_regs: ",pred_wh_regs.shape)
 
-
-                        loss,mask_loss,regr_loss = centerloss(pred_hm,hm,pred_regs,reg,reg_mask,inds,wh)
+                        loss ,mask_loss , regr_loss, regr_wh_loss = centerloss(pred_hm,
+                                                                   hm,
+                                                                   pred_regs,
+                                                                   regr,
+                                                                   pred_wh_regs,
+                                                                   wh_regr,
+                                                                   inds_mask,
+                                                                   inds,
+                                                                   wh,
+                                                                   regr_,
+                                                                   weight=0.4, 
+                                                                   size_average=True)
                         # if local_rank is not None:
                         #         # torch.distributed.barrier()'s role is to block the process and ensure that each process runs all the code before this line of code before it can continue to execute, so that the average loss and average acc will not appear because of the process execution speed. inconsistent error
                         #         torch.distributed.barrier()
@@ -122,6 +139,7 @@ def train(architecture='efd',
                         losses.append(loss.item())
                         mask_losses.append(mask_loss.item())
                         regr_losses.append(regr_loss.item())
+                        wh_regr_losses.append(regr_wh_loss.item())
                         if local_rank is not None and local_rank ==0:
                                 writer.add_scalar("Loss/train", loss.item(), total_ind)
                                 writer.add_scalar("Mask Loss/train", mask_loss.item(), total_ind)
@@ -170,7 +188,88 @@ def train(architecture='efd',
                         # im0.save('hm_0.png')
                         # im1.save('hm_1.png')
                 lr_scheduler.step()
+                break
         if writer is not None:
                 writer.flush()
                 writer.close()
         return model,losses,mask_losses,regr_losses, min_confidences, median_confidences, max_confidences
+    
+if __name__ == '__main__':
+    IMG_RESOLUTION=256 
+    # Mini COCO Dataset
+    # ds = COCODetectionDataset('/mnt/18f3044b-5d9f-4d98-8083-e88a3cf4ab35/coco_dataset/train2017',
+    # '/mnt/18f3044b-5d9f-4d98-8083-e88a3cf4ab35/coco_dataset/annotations/instances_minitrain2017.json',
+    # transform=train_transform_norm,
+    # MODEL_SCALE=1,
+    # IMG_RESOLUTION=IMG_RESOLUTION)
+    # val_ds = COCODetectionDataset('/mnt/18f3044b-5d9f-4d98-8083-e88a3cf4ab35/coco_dataset/val2017',
+    # '/mnt/18f3044b-5d9f-4d98-8083-e88a3cf4ab35/coco_dataset/annotations/instances_val2017.json',
+    # transform=validation_transform_norm,
+    # MODEL_SCALE=1,
+    # IMG_RESOLUTION=IMG_RESOLUTION)
+    DATASET_DIR = '/run/determined/workdir/coco_dataset'
+    IMG_RESOLUTION=256 
+    MODEL_SCALE=2
+    # Mini COCO Dataset
+    ds = COCODetectionDataset(os.path.join(DATASET_DIR,'train2017'),
+    os.path.join(DATASET_DIR,'annotations/instances_minitrain2017.json'),
+    transform=train_transform_norm,
+    MODEL_SCALE=MODEL_SCALE,
+    IMG_RESOLUTION=IMG_RESOLUTION)
+    val_ds = COCODetectionDataset(os.path.join(DATASET_DIR,'val2017'),
+    os.path.join(DATASET_DIR,'annotations/instances_val2017.json'),
+    transform=train_transform_norm,
+    MODEL_SCALE=MODEL_SCALE,
+    IMG_RESOLUTION=IMG_RESOLUTION)
+    
+
+    BATCH_SIZE = 32
+
+    train_loader = torch.utils.data.DataLoader(ds,
+                                            batch_size=BATCH_SIZE,
+                                            shuffle=True,
+                                            num_workers=4,
+                                            pin_memory=True,
+                                            collate_fn = coco_detection_collate_fn)
+    val_loader = torch.utils.data.DataLoader(val_ds,
+                                            batch_size=1,
+                                            shuffle=False,
+                                            num_workers=0,
+                                            pin_memory=True,
+                                            collate_fn = coco_detection_collate_fn)
+    
+    # LR = 1e-2
+    LR = 1e-3
+    # LR = 2.5e-4*BATCH_SIZE
+    from torch.utils.tensorboard import SummaryWriter
+    # writer = SummaryWriter(comment='mv2')
+    # writer = SummaryWriter(comment='_mini_coco_emv2')
+    writer = SummaryWriter(comment='_emv2_test')
+
+
+    multi_gpu=False
+    # visualize_res=IMG_RESOLUTION//4
+    visualize_res=IMG_RESOLUTION//MODEL_SCALE
+
+    # model, losses, mask_losses, regr_losses, min_confidences, median_confidences, max_confidences = train('mv2',
+    #                                                                                                         ds.num_classes,
+    #                                                                                                         learn_rate=LR,
+    #                                                                                                         epochs=300,
+    #                                                                                                         train_loader=train_loader,
+    #                                                                                                         val_ds=val_ds,
+    #                                                                                                         val_loader=val_loader,
+    #                                                                                                         writer=writer,
+    #                                                                                                         multi_gpu=multi_gpu,
+    #                                                                                                         visualize_res=visualize_res,
+    #                                                                                                         IMG_RESOLUTION=IMG_RESOLUTION)
+    model, losses, mask_losses, regr_losses, min_confidences, median_confidences, max_confidences = train('efd',
+                                                                                                            ds.num_classes,
+                                                                                                            learn_rate=LR,
+                                                                                                            epochs=1,
+                                                                                                            train_loader=train_loader,
+                                                                                                            val_ds=val_ds,
+                                                                                                            val_loader=val_loader,
+                                                                                                            writer=writer,
+                                                                                                            multi_gpu=multi_gpu,
+                                                                                                            visualize_res=visualize_res,
+                                                                                                            IMG_RESOLUTION=IMG_RESOLUTION)

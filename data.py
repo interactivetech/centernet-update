@@ -201,12 +201,14 @@ class COCODetectionDataset(torch.utils.data.Dataset):
 
         # print("boxes_aug: ",boxes_aug)
         # print("Model Scale: ",self.MODEL_SCALE)
-        hm, regr, wh_regr, wh,inds, ind_masks  = encode_hm_regr_and_wh_regr(boxes_aug,
+        hm, regr, wh_regr, wh,inds, ind_masks, regr_ = encode_hm_regr_and_wh_regr(boxes_aug,
                                                             labels,
                                                             N_CLASSES=self.num_classes,
                                                             input_size=self.IMG_RESOLUTION,
                                                             MODEL_SCALE=self.MODEL_SCALE,
                                                             MAX_N_OBJECTS=128)
+        # Andrew(10.14.2022): Note that regr_ is the regression ground truth in shape (MAX_N_OBJECTS,2) different than regr
+        # needed to for centernet loss
 
         hm = np.ascontiguousarray(hm)
         regr = np.ascontiguousarray(regr)
@@ -214,6 +216,7 @@ class COCODetectionDataset(torch.utils.data.Dataset):
         wh = np.ascontiguousarray(wh)
         ind_masks = np.ascontiguousarray(ind_masks)
         inds = np.ascontiguousarray(inds)
+        regr_ = np.ascontiguousarray(regr_)
             # h_hm_regr_multiclass2(boxesm,reg, cat_wh,cat_reg_mask,inds = make,
             #                                                             labels,
             #                                                             N_CLASSES=2,
@@ -222,25 +225,27 @@ class COCODetectionDataset(torch.utils.data.Dataset):
             #                                                             IN_SCALE=1,
             #                                                             MAX_N_OBJECTS=128)
 
-        return img, hm, regr, wh_regr,wh,ind_masks,inds, in_size, out_size, intermediate_size, scale, boxes_aug, target, idx
+        return img, hm, regr, wh_regr,wh,ind_masks,inds,regr_, in_size, out_size, intermediate_size, scale, boxes_aug, target, idx
         # return img, hm,reg, cat_wh,cat_reg_mask,inds 
 def coco_detection_collate_fn(batch):
     img = torch.Tensor(np.stack([x[0] for x in batch], axis=0))
     hm = torch.Tensor(np.stack([x[1] for x in batch], axis=0))
     regr = torch.Tensor(np.stack([x[2] for x in batch], axis=0))
-    wh = torch.Tensor(np.stack([x[3] for x in batch], axis=0))
-    ind_masks = torch.Tensor(np.stack([x[4] for x in batch], axis=0))
-    inds = torch.Tensor(np.stack([x[5] for x in batch], axis=0)).type(torch.int64)
-    in_size = torch.Tensor(np.stack([x[6] for x in batch], axis=0))
-    out_size = torch.Tensor(np.stack([x[7] for x in batch], axis=0))
-    intermediate_size = torch.Tensor(np.stack([x[8] for x in batch], axis=0))
-    scale = torch.Tensor(np.stack([x[9] for x in batch], axis=0))
+    wh_regr=torch.Tensor(np.stack([x[3] for x in batch], axis=0))
+    wh = torch.Tensor(np.stack([x[4] for x in batch], axis=0))
+    ind_masks = torch.Tensor(np.stack([x[5] for x in batch], axis=0))
+    inds = torch.Tensor(np.stack([x[6] for x in batch], axis=0)).type(torch.int64)
+    regr_ = torch.Tensor(np.stack([x[7] for x in batch], axis=0))
+    in_size = torch.Tensor(np.stack([x[8] for x in batch], axis=0))
+    out_size = torch.Tensor(np.stack([x[9] for x in batch], axis=0))
+    intermediate_size = torch.Tensor(np.stack([x[10] for x in batch], axis=0))
+    scale = torch.Tensor(np.stack([x[11] for x in batch], axis=0))
     # print(np.vstack([x[10] for x in batch]).shape)
-    boxes_aug = torch.Tensor(np.vstack([x[10] for x in batch]))
-    targets = [x[11] for x in batch]
-    idxs = [x[12] for x in batch]
+    boxes_aug = torch.Tensor(np.vstack([x[12] for x in batch]))
+    targets = [x[13] for x in batch]
+    idxs = [x[14] for x in batch]
 
-    return img, hm,regr,wh_regr, wh,ind_masks,inds, in_size, out_size, intermediate_size, scale, boxes_aug, targets, idxs
+    return img, hm,regr,wh_regr, wh,ind_masks,inds, regr_, in_size, out_size, intermediate_size, scale, boxes_aug, targets, idxs
 
 if __name__ == '__main__':
     # TODO, test and make sure COCO dataset is loading correctly
@@ -269,6 +274,7 @@ if __name__ == '__main__':
                   wh,
                   inds_mask,
                   inds,
+                  regr_,
                   in_size,
                   out_size,
                   intermediate_size,
@@ -293,6 +299,7 @@ if __name__ == '__main__':
         # print(regr_b.shape)
         
         wh_regr_b = torch.from_numpy(wh_regr).unsqueeze(0)
+        # print("regr_: ",regr_.shape)
         # print(wh_regr_b.shape)
         boxes,scores,clses = decode_predictions(hm_b,
                                                 regr_b,

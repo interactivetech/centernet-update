@@ -239,11 +239,12 @@ def encode_hm_regr_and_wh_regr(boxes, classes,N_CLASSES=None, input_size=None,MO
     inds = np.zeros((max_objs,), dtype=np.int64)
     ind_masks = np.zeros((max_objs,), dtype=np.uint8)
     w_h_ = np.zeros((max_objs, 2), dtype=np.float32)  # width and height
+    regr_ = np.zeros((max_objs, 2), dtype=np.float32)  # centernet regression
     for ind,(c,cl) in enumerate(zip(boxes,classes)):
         x,y,x2,y2 = c
         w = int(x2-x)
         h = int(y2-y)
-        print(w,h)
+        # print(w,h)
         centers = [(x+x2)/2.,(y+y2)/2.]
         # print("centers: ",centers)
         c_s = np.array([i/MODEL_SCALE for i in centers])
@@ -258,11 +259,12 @@ def encode_hm_regr_and_wh_regr(boxes, classes,N_CLASSES=None, input_size=None,MO
                                 radius)
         draw_dense_reg(wh_regr,hm[cl],c_s,np.array([w,h],dtype=np.float32),radius)
         draw_dense_reg(regr,hm[cl],c_s,centers-centers_int,radius)
-        w_h_[ind] = 1. * w, 1. * h
+        w_h_[ind] = np.array([1.*w,1.*h],dtype=np.float32)
+        regr_[ind]=centers-centers_int
         inds[ind] = centers_int[1] * fmap_dim + centers_int[0]
         ind_masks[ind] = 1
     
-    return hm, regr, wh_regr, w_h_,inds, ind_masks
+    return hm, regr, wh_regr, w_h_,inds, ind_masks, regr_
 
 def visualize_gt_on_output(boxes, classes,hm,MODEL_SCALE=None):
     '''
@@ -336,8 +338,8 @@ def decode_predictions(hm,regr,wh_regr,MODEL_SCALE=None,K=100,nms_thresh=None):
     batch,cat, height, width = hm.shape
 
     scores, inds, clses, ys, xs = _topk(hm, K=K)
-    print("inds: ",inds.shape)
-    print("regr: ",regr.shape)
+    # print("inds: ",inds.shape)
+    # print("regr: ",regr.shape)
     regs = _tranpose_and_gather_feature(regr, inds)
     regs = regs.view(batch, K, 2)
     # print(regs.shape)
@@ -380,14 +382,20 @@ if __name__ == '__main__':
                     [38,38,70,70]])
 
     classes = np.array([0,1,0])
-    hm, regr, wh_regr, w_h_,inds, ind_masks= encode_hm_regr_and_wh_regr(boxes_o, classes,N_CLASSES=2, input_size=128,MODEL_SCALE=2)
+    hm, regr, wh_regr, w_h_,inds, ind_masks, regr_= encode_hm_regr_and_wh_regr(boxes_o, 
+                                                                               classes,
+                                                                               N_CLASSES=2, 
+                                                                               input_size=128,
+                                                                               MODEL_SCALE=2,
+                                                                               MAX_N_OBJECTS=128)
     print(hm.shape)
-    print("hm.shape: {}, regr.shape: {}, wh_regr.shape: {}, w_h_.shape: {},inds.shape: {}, ind_masks.shape: {}".format(hm.shape, 
+    print("hm.shape: {}, regr.shape: {}, wh_regr.shape: {}, w_h_.shape: {},inds.shape: {}, ind_masks.shape: {}, regr_: {}".format(hm.shape, 
                                                                                                 regr.shape, 
                                                                                                 wh_regr.shape, 
                                                                                                 w_h_.shape,
                                                                                                 inds.shape, 
-                                                                                                ind_masks.shape))
+                                                                                                ind_masks.shape,
+                                                                                                regr_.shape))
     hm_b = torch.from_numpy(hm).unsqueeze(0)
     regr_b = torch.from_numpy(regr).unsqueeze(0)
     wh_regr_b = torch.from_numpy(wh_regr).unsqueeze(0)
