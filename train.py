@@ -192,7 +192,7 @@ def train(architecture='efd',
         if writer is not None:
                 writer.flush()
                 writer.close()
-        return model,losses,mask_losses,regr_losses, min_confidences, median_confidences, max_confidences
+        return model,losses,mask_losses,regr_losses,wh_regr_losses, min_confidences, median_confidences, max_confidences
     
 if __name__ == '__main__':
     IMG_RESOLUTION=256 

@@ -14,7 +14,9 @@ import random
 import os
 
 import argparse
-
+import datetime
+parser = argparse.ArgumentParser()
+parser.add_argument('--local_rank', type=int, default=0)
 
 def seed_everything(seed=1):
     random.seed(seed)
@@ -25,7 +27,17 @@ def seed_everything(seed=1):
     torch.backends.cudnn.deterministic = True
     
 seed_everything()
-if __name__ == '__main__':
+
+def main():
+
+    torch.cuda.set_device ( args.local_rank ) # use set_device and cuda to specify the desired GPU
+    torch.distributed.init_process_group(
+    'nccl',
+        init_method='env://',
+        world_size=4,
+        timeout=datetime.timedelta(seconds=18000),
+        rank=args.local_rank,
+    )
     IMG_RESOLUTION=256 
     MODEL_SCALE=2
     # Mini COCO Dataset
@@ -56,12 +68,23 @@ if __name__ == '__main__':
     # IMG_RESOLUTION=IMG_RESOLUTION)
     
 
-    BATCH_SIZE = 52
-
+    BATCH_SIZE = 72
+    samp = torch.utils.data.distributed.DistributedSampler(ds,shuffle=True)
+    t_sampler = torch.utils.data.distributed.DistributedSampler(val_ds,shuffle=False)
+    # generator = torch.Generator()
+    # generator.manual_seed(0)
+    train_loader = torch.utils.data.DataLoader(ds,
+                                            batch_size=BATCH_SIZE,
+                                            num_workers=8,
+                                            pin_memory=True,
+                                            sampler=samp,
+                                            collate_fn = coco_detection_collate_fn,
+                                            generator=None)
+    print("Len of Train Loader: ",len(train_loader))
     train_loader = torch.utils.data.DataLoader(ds,
                                             batch_size=BATCH_SIZE,
                                             shuffle=True,
-                                            num_workers=8,
+                                            num_workers=2,
                                             pin_memory=True,
                                             collate_fn = coco_detection_collate_fn)
     val_loader = torch.utils.data.DataLoader(val_ds,
@@ -70,20 +93,25 @@ if __name__ == '__main__':
                                             num_workers=0,
                                             pin_memory=True,
                                             collate_fn = coco_detection_collate_fn)
-    
+    print("Len of Val Loader: ",len(val_loader))
+
     # LR = 1e-2
     LR = 1e-3
     # LR = 2.5e-4*BATCH_SIZE
     from torch.utils.tensorboard import SummaryWriter
     # writer = SummaryWriter(comment='mv2')
     # writer = SummaryWriter(comment='_mini_coco_emv2')
-    writer = SummaryWriter(comment='_emv2_test')
+    print("args.local_rank: ",args.local_rank)
+    writer=None
+    if args.local_rank == 0:
+        # writer = SummaryWriter(comment='_shape_mv2')
+        writer = SummaryWriter(comment='_efd')
 
 
-    multi_gpu=False
+    multi_gpu=True
     # visualize_res=IMG_RESOLUTION//4
     visualize_res=IMG_RESOLUTION//2
-    EPOCHS = 1
+    EPOCHS = 10
     # model, losses, mask_losses, regr_losses, min_confidences, median_confidences, max_confidences = train('mv2',
     #                                                                                                         ds.num_classes,
     #                                                                                                         learn_rate=LR,
@@ -107,9 +135,9 @@ if __name__ == '__main__':
                                                                                                             visualize_res=visualize_res,
                                                                                                             IMG_RESOLUTION=IMG_RESOLUTION)
     if multi_gpu:
-        torch.save(model.module.state_dict(),'efficient_centernet_{}_mini_coco_fruit.pth'.format(EPOCHS))
+        torch.save(model.module.state_dict(),'ddp_efficient_centernet_{}_coco.pth'.format(EPOCHS))
     else:
-        torch.save(model.state_dict(),'efficient_centernet_{}_fruit.pth'.format(EPOCHS))
+        torch.save(model.state_dict(),'efficient_centernet_{}.pth'.format(EPOCHS))
     plt.plot(range(len(losses)),losses )
     plt.plot(range(len(losses)),mask_losses)
     plt.plot(range(len(losses)),regr_losses)
@@ -136,7 +164,7 @@ if __name__ == '__main__':
     # eval
     # val(model,val_ds,val_loader,writer,epoch)
 
-    for img,hm, regr,wh_regr, wh, inds_mask, inds, regr_, in_size, out_size, intermediate_size, scale, boxes_aug, target, idxs in val_loader:
+    for img, hm, reg, wh,reg_mask,inds, in_size, out_size, intermediate_size, scale,boxes_aug, target, idxs in val_loader:
             break
 
     pred_hm, pred_regr,pred_wh_regr = model(img)# (4,1,128,128), (4,2,128,128)
@@ -188,3 +216,6 @@ if __name__ == '__main__':
 #         plt.title("prediction centerpoints for Class {} from model".format(i))
 #         plt.imshow(hm_pred)
 #         plt.savefig("hm_preds.png")
+if __name__ == '__main__':
+    args = parser.parse_args()
+    main(args)

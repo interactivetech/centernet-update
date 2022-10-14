@@ -1,0 +1,1 @@
+python -m torch.distributed.launch --nproc_per_node=4 main_ddp.py 2>&1 | tee out.log
