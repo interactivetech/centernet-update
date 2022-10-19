@@ -27,15 +27,15 @@ def train_transform_norm(annotations,INPUT_SIZE,with_bboxes=True):
             # albu.RandomSizedBBoxSafeCrop(*intermediate_size),
             # albu.Resize(height = intermediate_size[0],width = intermediate_size[1]),
             albu.Resize(*intermediate_size),
-            albu.HorizontalFlip(p=0.5),
+            # albu.HorizontalFlip(p=0.5),
             albu.HueSaturationValue(p=0.5),
             albu.RGBShift(p=0.5),
             albu.RandomBrightnessContrast(p=0.5),
-            albu.MotionBlur(p=0.5),
+            # albu.MotionBlur(p=0.5),
             albu.PadIfNeeded(*size,border_mode=cv2.BORDER_CONSTANT,mask_value=0.0),
             albu.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
         ],
-        albu.BboxParams(format='coco', min_area=0.0,
+        albu.BboxParams(format='coco', min_area=3.0,
                         min_visibility=0.0, label_fields=['labels'])
     )
     
@@ -53,8 +53,8 @@ def train_transform_norm(annotations,INPUT_SIZE,with_bboxes=True):
 def validation_transform_norm(annotations, INPUT_SIZE,with_bboxes=True):
     bbox_params = None
     if with_bboxes:
-        bbox_params = albu.BboxParams(format='coco', min_area=0.0,
-                        min_visibility=0.0, label_fields=['labels'])
+        bbox_params = albu.BboxParams(format='coco', min_area=9.,
+                        min_visibility=0.3, label_fields=['labels'])
     
     image = annotations['image']#H,W,C
     # print("image.shape: ",image.shape)
@@ -176,7 +176,7 @@ class COCODetectionDataset(torch.utils.data.Dataset):
 
         target = self.targets[idx]
         # print("target['boxes']: ",target['boxes'])
-        boxes = np.array(target['boxes'])
+        boxes = np.array(target['boxes']).reshape(-1,4)
         # print("boxes: ", boxes)
         # print("boxes: ",boxes)
         labels = np.array(target['labels'])
@@ -190,8 +190,9 @@ class COCODetectionDataset(torch.utils.data.Dataset):
 
         
         img  = anns['image'].transpose(2,0,1)
-        boxes_aug = np.asarray(anns['bboxes'])
-        # print("boxes_aug: ",boxes_aug)
+        boxes_aug = np.asarray(anns['bboxes']).reshape(-1,4)
+        if boxes_aug.size==0:
+            print("-boxes_aug: ",boxes_aug.shape)
 
         labels = np.asarray(anns['labels'])
         in_size = anns['in_size']

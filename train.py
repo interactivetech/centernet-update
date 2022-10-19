@@ -12,7 +12,7 @@ from PIL import Image
 # from val import val
 from model import EfficientCenterDet
 import os
-
+from val import val
 import torch.distributed as dist
 
 
@@ -27,15 +27,17 @@ def train(architecture='efd',
           multi_gpu=False,
           visualize_res=None,
           IMG_RESOLUTION=None,
-          local_rank=None):
+          local_rank=None,
+          MODEL_SCALE=None):
         if architecture == 'efd':
                 model = EfficientCenterDet(num_classes=num_classes)
-
+                # ckpt = torch.load('/home/projects/centernet-update/ddp_efficient_centernet_50.pth')
+                # model.load_state_dict(ckpt)
         
         if multi_gpu and local_rank is None:
                 # model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
-                model = torch.nn.DataParallel(model,device_ids=[0,1,2,3],output_device=[0])
-
+                # model = torch.nn.DataParallel(model,device_ids=[0,1,2,3],output_device=[0])
+                print("Not using")
                 # model = torch.nn.parallel.DistributedDataParallel(model,device_ids=[local_rank],output_device=[local_rank])
         elif multi_gpu and local_rank is not None:
                 model = model.to(local_rank)
@@ -56,7 +58,7 @@ def train(architecture='efd',
         elif not torch.cuda.is_available():
                 DEVICE='cpu'
         print(DEVICE)
-        model.to(DEVICE)  # Move model to the device selected for training
+        # model.to(DEVICE)  # Move model to the device selected for training
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[200,300], gamma=0.1)
         losses = []
         mask_losses = []
@@ -126,7 +128,7 @@ def train(architecture='efd',
                         with torch.no_grad():
                                 pred_hm = torch.sigmoid(pred_hm).detach()
                         p = pred_hm[pred_hm>0]
-                        if len(p.size()) > 0 :
+                        if p.numel() > 0 :
                                 # print("Min confidence: {}, Median confidence: {}, Max Confidence: {}".format(p.min(), np.median(p), p.max()))
                                 # print(p.min().item())
                                 min_confidences.append(p.min().item())
@@ -144,6 +146,8 @@ def train(architecture='efd',
                                 writer.add_scalar("Loss/train", loss.item(), total_ind)
                                 writer.add_scalar("Mask Loss/train", mask_loss.item(), total_ind)
                                 writer.add_scalar("Reg Loss/train", regr_loss.item(), total_ind)
+                                writer.add_scalar("WH Loss/train", regr_wh_loss.item(), total_ind)
+
                                 writer.add_scalar("Max Conf Score/train", max_confidences[-1], total_ind)
                                 lr = lr_scheduler.get_lr()[0]
                                 # print(lr)
@@ -170,25 +174,32 @@ def train(architecture='efd',
                 # Save Example
                 # if epoch > 0 and epoch%10==0:
                 # print(img.shape)
-                
-                if epoch > 0 and epoch%100==0:
+                 
+                if epoch > 50 and epoch % 20==0:
                         # Val
                         if local_rank is not None and local_rank==0:
-                                # val(model,val_ds,val_loader, writer,epoch,visualize_res=visualize_res,IMG_RESOLUTION=IMG_RESOLUTION,device=DEVICE)
+                                val(model,
+                                    val_ds,
+                                    val_loader, 
+                                    writer,
+                                    epoch,
+                                    visualize_res=visualize_res,
+                                    IMG_RESOLUTION=IMG_RESOLUTION,
+                                    device=torch.device('cuda:{}'.format(local_rank)),  
+                                    MODEL_SCALE=MODEL_SCALE)
                                 if multi_gpu:
                                         torch.save(model.module.state_dict(),'ddp_efficient_centernet_{}.pth'.format(epoch))
                                 elif multi_gpu==False:
                                         torch.save(model.state_dict(),'efficient_centernet_{}.pth'.format(epoch))
-                                model.train()
-                        elif writer is not None:
+                        model.train()
+                        # elif writer is not None:
                                 # val(model,val_ds,val_loader, writer,epoch,visualize_res=visualize_res,IMG_RESOLUTION=IMG_RESOLUTION,device=None)
-                                model.train()
+                                # model.train()
                         # im0 = Image.fromarray(i0)
                         # im1 = Image.fromarray(i1)
                         # im0.save('hm_0.png')
                         # im1.save('hm_1.png')
                 lr_scheduler.step()
-                break
         if writer is not None:
                 writer.flush()
                 writer.close()

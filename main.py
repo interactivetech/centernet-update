@@ -105,7 +105,8 @@ if __name__ == '__main__':
                                                                                                             writer=writer,
                                                                                                             multi_gpu=multi_gpu,
                                                                                                             visualize_res=visualize_res,
-                                                                                                            IMG_RESOLUTION=IMG_RESOLUTION)
+                                                                                                            IMG_RESOLUTION=IMG_RESOLUTION,
+                                                                                                            MODEL_SCALE=MODEL_SCALE)
     if multi_gpu:
         torch.save(model.module.state_dict(),'efficient_centernet_{}_mini_coco_fruit.pth'.format(EPOCHS))
     else:

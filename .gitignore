@@ -2,10 +2,12 @@
 __pycache__/
 *.py[cod]
 *$py.class
+
 *.png
 *.json
 *.gif
 *.pth
+*.log
 runs/
 # C extensions
 *.so

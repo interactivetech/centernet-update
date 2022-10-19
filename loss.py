@@ -54,7 +54,7 @@ def neg_loss(pred, gt):
   # prob_pred = F.logsigmoid(pred)
   # pos_loss = F.logsigmoid(pred) * torch.pow(1 - prob_pred, 3) * pos_inds
   # neg_loss = F.logsigmoid(1 - pred) * torch.pow(prob_pred, 3) * neg_inds *  neg_weights 
-  pred = torch.sigmoid(pred)
+  ppred = torch.clamp(torch.sigmoid(pred), min=1e-4, max=1 - 1e-4)
   pos_pred = pred[pos_inds]
   neg_pred = pred[neg_inds]
   # pred = torch.clamp(torch.sigmoid(pred), min=1e-4, max=1 - 1e-4)
@@ -149,7 +149,7 @@ def centerloss(pred_hm,
     regr_loss = _reg_loss(pred_regr_m,regr_,mask)
 
     pred_wh_regr_m = _tranpose_and_gather_feature(pred_wh_regr, inds)
-    regr_wh_loss = _reg_loss(pred_wh_regr_m,wh,mask)
+    regr_wh_loss = 0.1*_reg_loss(pred_wh_regr_m,wh,mask)
 
     loss =mask_loss + regr_loss + regr_wh_loss
     return loss ,mask_loss , regr_loss, regr_wh_loss
