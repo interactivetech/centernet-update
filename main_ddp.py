@@ -79,9 +79,8 @@ def main(args):
     # IMG_RESOLUTION=IMG_RESOLUTION)
     
 
-    BATCH_SIZE = 12
+    BATCH_SIZE = 32
     # BATCH_SIZE = 8
-
     samp = torch.utils.data.distributed.DistributedSampler(ds,shuffle=True)
     # t_sampler = torch.utils.data.distributed.DistributedSampler(val_ds,shuffle=False)
     # generator = torch.Generator()
@@ -108,8 +107,13 @@ def main(args):
                                             collate_fn = coco_detection_collate_fn)
     print("Len of Val Loader: ",len(val_loader))
 
-    # LR = 1e-3
-    LR = 1e-2
+    LR = 1e-3
+    # LR = 1e-2
+    assert LR==1e-3
+    assert BATCH_SIZE==32
+    # assert LR==1e-2
+    # assert BATCH_SIZE==16
+
     # LR = 2.5e-4*BATCH_SIZE
     from torch.utils.tensorboard import SummaryWriter
     # writer = SummaryWriter(comment='mv2')
